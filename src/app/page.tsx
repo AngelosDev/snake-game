@@ -7,6 +7,7 @@ import { Volume2, VolumeX } from "lucide-react"
 // Define types
 type Direction = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT'
 type Position = [number, number]
+type LeaderboardEntry = { nickname: string; score: number }
 
 // Define a custom Window interface that includes webkitAudioContext
 interface CustomWindow extends Window {
@@ -65,7 +66,54 @@ export default function EnhancedSnakeGame() {
   const [isRainbow, setIsRainbow] = useState(false)
   const [fruitColor, setFruitColor] = useState(FRUIT_COLORS[0])
   const [isMuted, setIsMuted] = useState(false)
+  const [nickname, setNickname] = useState('')
+  const [gameStarted, setGameStarted] = useState(false)
+  const [nicknameError, setNicknameError] = useState('')
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
   const audioContextRef = useRef<AudioContext | null>(null)
+
+  useEffect(() => {
+    const savedNickname = localStorage.getItem('snakeGameNickname')
+    if (savedNickname) {
+      setNickname(savedNickname)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (gameOver) {
+      const timer = setTimeout(() => {
+        fetchLeaderboard()
+      }, 500) // Delay of 500ms to ensure the score is recorded before fetching
+      return () => clearTimeout(timer)
+    }
+  }, [gameOver])
+
+  const handleNicknameSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      const response = await fetch('/api/register-nickname', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nickname }),
+      })
+      const data = await response.json()
+      if (response.ok) {
+        localStorage.setItem('snakeGameNickname', nickname)
+        setGameStarted(true)
+        setNicknameError('')
+      } else {
+        setNicknameError(data.message)
+        if (data.suggestion) {
+          setNickname(data.suggestion)
+        }
+      }
+    } catch (error) {
+      console.error('Error registering nickname:', error)
+      setNicknameError('An error occurred. Please try again.')
+    }
+  }
 
   // Generate beep sound
   const playBeep = useCallback(() => {
@@ -139,6 +187,7 @@ export default function EnhancedSnakeGame() {
     // Check for collision with self
     if (newSnake.slice(1).some(segment => segment[0] === head[0] && segment[1] === head[1])) {
       setGameOver(true)
+      sendScore()
       return
     }
 
@@ -165,14 +214,16 @@ export default function EnhancedSnakeGame() {
 
   // Set up game loop and event listener
   useEffect(() => {
-    const gameLoop = setInterval(moveSnake, GAME_SPEED)
-    window.addEventListener('keydown', handleKeyPress)
+    if (gameStarted && !gameOver) {
+      const gameLoop = setInterval(moveSnake, GAME_SPEED)
+      window.addEventListener('keydown', handleKeyPress)
 
-    return () => {
-      clearInterval(gameLoop)
-      window.removeEventListener('keydown', handleKeyPress)
+      return () => {
+        clearInterval(gameLoop)
+        window.removeEventListener('keydown', handleKeyPress)
+      }
     }
-  }, [moveSnake, handleKeyPress])
+  }, [moveSnake, handleKeyPress, gameStarted, gameOver])
 
   // Reset game
   const resetGame = () => {
@@ -183,11 +234,62 @@ export default function EnhancedSnakeGame() {
     setGameOver(false)
     setIsRainbow(false)
     setFruitColor(FRUIT_COLORS[0])
+    setGameStarted(true)
+    setLeaderboard([])
   }
 
   // Toggle mute
   const toggleMute = () => {
     setIsMuted(!isMuted)
+  }
+
+  // Send score to server
+  const sendScore = async () => {
+    try {
+      await fetch('/api/record-score', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nickname, score }),
+      })
+    } catch (error) {
+      console.error('Error recording score:', error)
+    }
+  }
+
+  // Fetch leaderboard
+  const fetchLeaderboard = async () => {
+    try {
+      const response = await fetch('/api/record-score')
+      const data = await response.json()
+      const sortedLeaderboard = Object.entries(data)
+        .map(([nickname, score]) => ({ nickname, score: score as number }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 10)
+      setLeaderboard(sortedLeaderboard)
+    } catch (error) {
+      console.error('Error fetching leaderboard:', error)
+    }
+  }
+
+  if (!gameStarted) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-800">
+        <h1 className="text-5xl font-bold mb-4 text-white shadow-lg">Snake Game</h1>
+        <form onSubmit={handleNicknameSubmit} className="flex flex-col items-center">
+          <input
+            type="text"
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
+            placeholder="Enter your nickname"
+            className="px-4 py-2 mb-2 rounded"
+          />
+          {nicknameError && <p className="text-red-500 mb-2">{nicknameError}</p>}
+          <Button type="submit">Start Game</Button>
+        </form>
+      </div>
+    )
   }
 
   return (
@@ -244,6 +346,19 @@ export default function EnhancedSnakeGame() {
       {gameOver && (
         <div className="mt-4 text-center">
           <h2 className="text-3xl font-bold mb-2 text-white">Game Over!</h2>
+          <p className="text-xl text-white mb-4">Your score: {score}</p>
+          {leaderboard.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-2xl font-bold text-white mb-2">Leaderboard</h3>
+              <ul className="bg-gray-700 rounded-lg p-2">
+                {leaderboard.map((entry, index) => (
+                  <li key={index} className="text-white">
+                    {index + 1}. {entry.nickname}: {entry.score}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <Button onClick={resetGame} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded">
             Play Again
           </Button>
