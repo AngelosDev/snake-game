@@ -22,7 +22,7 @@ A modern implementation of the classic Snake game using Next.js, React, and Type
 
 1. Clone the repository:
    ```
-   git clone https://github.com/your-username/snake-game.git
+   git clone https://github.com/AngelosDev/snake-game.git
    cd snake-game
    ```
 
